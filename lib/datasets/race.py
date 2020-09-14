@@ -12,7 +12,7 @@ import torch.utils.data as data
 import pandas as pd
 from PIL import Image, ImageFile
 import numpy as np
-
+import math
 from ..utils.transforms import fliplr_joints, crop, generate_target, transform_pixel
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -25,13 +25,13 @@ class RACE(data.Dataset):
         # specify annotation file for dataset
 
         if is_train:
-            self.txt_file = cfg.DATASET.TRAINSET
+            self.data_root = cfg.DATASET.TRAINSET
         else:
-            self.csv_file = cfg.DATASET.TESTSET
+            self.data_root = cfg.DATASET.TESTSET
 
         self.is_train = is_train
         self.transform = transform
-        self.data_root = cfg.DATASET.ROOT
+        # self.data_root = cfg.DATASET.ROOT
         self.input_size = cfg.MODEL.IMAGE_SIZE
         self.output_size = cfg.MODEL.HEATMAP_SIZE
         self.sigma = cfg.MODEL.SIGMA
@@ -58,23 +58,25 @@ class RACE(data.Dataset):
         image_path = os.path.join(self.data_root,
                                   'picture',self.img_list[idx])
         bbox_path = os.path.join(self.data_root,
-                                  'bbox',self.img_list[idx].split('.')[0],'.txt')
-        lmk_path = os.path.join(self.data_root,
-                                  'landmark',self.img_list[idx].split('.')[0],'.txt')
+                                  'bbox',self.img_list[idx].split('.')[0]) + '.txt'
+        if self.is_train:
+            lmk_path = os.path.join(self.data_root,
+                                    'landmark',self.img_list[idx].split('.')[0]) + '.txt'
         bbox = []
         with open(bbox_path, "r") as f:
             for line in f.readlines():
                     line = line.strip('\n').split(' ')
                     bbox.extend(line)
-        bbox = [int(i) for i in bbox]
+        bbox = [float(i) for i in bbox]
 
-        pts = []
-        with open(lmk_path, "r") as f:
-            for line in f.readlines():
-                if line != 0:
-                    line = line.strip('\n').split(' ')
-                    pts.extend(line)
-        pts = [int(i) for i in pts[1:]]
+        if self.is_train:
+            pts = []
+            with open(lmk_path, "r") as f:
+                for line in f.readlines():
+                    if line != 0:
+                        line = line.strip('\n').split(' ')
+                        pts.extend(line)
+            pts = [float(i) for i in pts[1:]]
         
         center_w = (math.floor(bbox[0]) + math.ceil(bbox[2])) / 2.0
         center_h = (math.floor(bbox[1]) + math.ceil(bbox[3])) / 2.0
@@ -83,10 +85,12 @@ class RACE(data.Dataset):
 
         center = torch.Tensor([center_w, center_h])
 
-        pts = np.ndarray(pts).astype('float').reshape(-1, 2)
+        if self.is_train:
+            pts = np.array(pts).astype('float').reshape(-1, 2)
 
         scale *= 1.25
-        nparts = pts.shape[0]
+        if self.is_train:
+            nparts = pts.shape[0]
         img = np.array(Image.open(image_path).convert('RGB'), dtype=np.float32)
 
         r = 0
@@ -100,29 +104,34 @@ class RACE(data.Dataset):
                 pts = fliplr_joints(pts, width=img.shape[1], dataset='RACE')
                 center[0] = img.shape[1] - center[0]
 
+            target = np.zeros((nparts, self.output_size[0], self.output_size[1]))
+            tpts = pts.copy()
+
+            for i in range(nparts):
+                if tpts[i, 1] > 0:
+                    tpts[i, 0:2] = transform_pixel(tpts[i, 0:2]+1, center,
+                                                scale, self.output_size, rot=r)
+                    target[i] = generate_target(target[i], tpts[i]-1, self.sigma,
+                                                label_type=self.label_type)
+
         img = crop(img, center, scale, self.input_size, rot=r)
-
-        target = np.zeros((nparts, self.output_size[0], self.output_size[1]))
-        tpts = pts.copy()
-
-        for i in range(nparts):
-            if tpts[i, 1] > 0:
-                tpts[i, 0:2] = transform_pixel(tpts[i, 0:2]+1, center,
-                                               scale, self.output_size, rot=r)
-                target[i] = generate_target(target[i], tpts[i]-1, self.sigma,
-                                            label_type=self.label_type)
         img = img.astype(np.float32)
         img = (img/255.0 - self.mean) / self.std
         img = img.transpose([2, 0, 1])
-        target = torch.Tensor(target)
-        tpts = torch.Tensor(tpts)
+        if self.is_train:
+            target = torch.Tensor(target)
+            tpts = torch.Tensor(tpts)
         center = torch.Tensor(center)
         bbox = torch.Tensor(bbox)
 
-        meta = {'index': idx, 'center': center, 'scale': scale, 'bbox': bbox
-                'pts': torch.Tensor(pts), 'tpts': tpts}
-
-        return img, target, meta
+        if self.is_train:
+            meta = {'index': idx, 'center': center, 'scale': scale, 'bbox': bbox,
+                    'pts': torch.Tensor(pts), 'tpts': tpts}
+            return img, target, meta
+        else:
+            meta = {'index': idx, 'center': center, 'scale': scale, 'bbox': bbox,
+                    'img_name': self.img_list[idx]}
+            return img, meta
 
 
 if __name__ == '__main__':

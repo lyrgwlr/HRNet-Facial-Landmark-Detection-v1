@@ -55,7 +55,7 @@ def compute_nme(preds, meta):
         elif L == 98:
             interocular = np.linalg.norm(pts_gt[60, ] - pts_gt[72, ])
         elif L == 106:
-            x1, y1, x2, y2 = meta['bbox']
+            x1, y1, x2, y2 = meta['bbox'][i]
             width_bbox, height_bbox = x2-x1, y2-y1
             interocular = np.sqrt(width_bbox*height_bbox)
         else:

@@ -8,6 +8,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
 import time
 import logging
 
@@ -102,6 +103,7 @@ def train(config, train_loader, model, critertion, optimizer,
     msg = 'Train Epoch {} time:{:.4f} loss:{:.4f} nme:{:.4f}'\
         .format(epoch, batch_time.avg, losses.avg, nme)
     logger.info(msg)
+    return nme
 
 
 def validate(config, val_loader, model, criterion, epoch, writer_dict):
@@ -169,57 +171,93 @@ def validate(config, val_loader, model, criterion, epoch, writer_dict):
 
     return nme, predictions
 
+# def inference(config, data_loader, model):
+#     batch_time = AverageMeter()
+#     data_time = AverageMeter()
+#     losses = AverageMeter()
 
-def inference(config, data_loader, model):
+#     num_classes = config.MODEL.NUM_JOINTS
+#     predictions = torch.zeros((len(data_loader.dataset), num_classes, 2))
+
+#     model.eval()
+
+#     nme_count = 0
+#     nme_batch_sum = 0
+#     count_failure_008 = 0
+#     count_failure_010 = 0
+#     end = time.time()
+
+#     with torch.no_grad():
+#         for i, (inp, target, meta) in enumerate(data_loader):
+#             data_time.update(time.time() - end)
+#             output = model(inp)
+#             score_map = output.data.cpu()
+#             preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+
+#             # NME
+#             nme_temp = compute_nme(preds, meta)
+
+#             failure_008 = (nme_temp > 0.08).sum()
+#             failure_010 = (nme_temp > 0.10).sum()
+#             count_failure_008 += failure_008
+#             count_failure_010 += failure_010
+
+#             nme_batch_sum += np.sum(nme_temp)
+#             nme_count = nme_count + preds.size(0)
+#             for n in range(score_map.size(0)):
+#                 predictions[meta['index'][n], :, :] = preds[n, :, :]
+
+#             # measure elapsed time
+#             batch_time.update(time.time() - end)
+#             end = time.time()
+
+#     nme = nme_batch_sum / nme_count
+#     failure_008_rate = count_failure_008 / nme_count
+#     failure_010_rate = count_failure_010 / nme_count
+
+#     msg = 'Test Results time:{:.4f} loss:{:.4f} nme:{:.4f} [008]:{:.4f} ' \
+#           '[010]:{:.4f}'.format(batch_time.avg, losses.avg, nme,
+#                                 failure_008_rate, failure_010_rate)
+#     logger.info(msg)
+
+#     return nme, predictions
+
+def inference(config, data_loader, model, out_path):
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = AverageMeter()
 
     num_classes = config.MODEL.NUM_JOINTS
     predictions = torch.zeros((len(data_loader.dataset), num_classes, 2))
 
     model.eval()
-
-    nme_count = 0
-    nme_batch_sum = 0
-    count_failure_008 = 0
-    count_failure_010 = 0
     end = time.time()
-
     with torch.no_grad():
-        for i, (inp, target, meta) in enumerate(data_loader):
+        for i, (inp, meta) in enumerate(data_loader):
+        
             data_time.update(time.time() - end)
+
             output = model(inp)
             score_map = output.data.cpu()
+            # preds: N x L x 2
             preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
 
-            # NME
-            nme_temp = compute_nme(preds, meta)
-
-            failure_008 = (nme_temp > 0.08).sum()
-            failure_010 = (nme_temp > 0.10).sum()
-            count_failure_008 += failure_008
-            count_failure_010 += failure_010
-
-            nme_batch_sum += np.sum(nme_temp)
-            nme_count = nme_count + preds.size(0)
             for n in range(score_map.size(0)):
-                predictions[meta['index'][n], :, :] = preds[n, :, :]
+                name = meta['img_name'][n].split('.')[0]+'.txt'
+                per_path = os.path.join(out_path, 'res', name)
+
+                with open(per_path, 'w') as f:
+                    f.write('106\n')
+                    for k in range(preds.shape[1]):
+                        x, y = preds[n, k, :]
+                        x, y = round(x.item()), round(y.item())
+                        f.write('{} {}\n'.format(x, y))
+                # predictions[meta['index'][n], :, :] = preds[n, :, :]
 
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
 
-    nme = nme_batch_sum / nme_count
-    failure_008_rate = count_failure_008 / nme_count
-    failure_010_rate = count_failure_010 / nme_count
-
-    msg = 'Test Results time:{:.4f} loss:{:.4f} nme:{:.4f} [008]:{:.4f} ' \
-          '[010]:{:.4f}'.format(batch_time.avg, losses.avg, nme,
-                                failure_008_rate, failure_010_rate)
+    msg = 'Test Results time:{:.4f}'.format(batch_time.avg)
     logger.info(msg)
-
-    return nme, predictions
-
 
 

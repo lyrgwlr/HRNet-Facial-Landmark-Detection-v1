@@ -82,10 +82,14 @@ def get_optimizer(cfg, model):
 
 
 def save_checkpoint(states, predictions, is_best,
-                    output_dir, filename='checkpoint.pth'):
-    preds = predictions.cpu().data.numpy()
+                    output_dir, filename='checkpoint.pth.tar'):
+    
     torch.save(states, os.path.join(output_dir, filename))
-    torch.save(preds, os.path.join(output_dir, 'current_pred.pth'))
+    if predictions == None:
+        pass
+    else: 
+        preds = predictions.cpu().data.numpy()
+        torch.save(preds, os.path.join(output_dir, 'current_pred.pth'))
 
     latest_path = os.path.join(output_dir, 'latest.pth')
     if os.path.islink(latest_path):
@@ -93,5 +97,5 @@ def save_checkpoint(states, predictions, is_best,
     os.symlink(os.path.join(output_dir, filename), latest_path)
 
     if is_best and 'state_dict' in states.keys():
-        torch.save(states['state_dict'].module, os.path.join(output_dir, 'model_best.pth'))
+        torch.save(states['state_dict'], os.path.join(output_dir, 'model_best.pth'))
 

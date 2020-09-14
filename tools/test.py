@@ -37,7 +37,7 @@ def parse_args():
 def main():
 
     args = parse_args()
-
+    # import pudb; pudb.set_trace()
     logger, final_output_dir, tb_log_dir = \
         utils.create_logger(config, args.cfg, 'test')
 
@@ -55,14 +55,14 @@ def main():
 
     gpus = list(config.GPUS)
     model = nn.DataParallel(model, device_ids=gpus).cuda()
-
+   
     # load model
     state_dict = torch.load(args.model_file)
     if 'state_dict' in state_dict.keys():
         state_dict = state_dict['state_dict']
         model.load_state_dict(state_dict)
     else:
-        model.module.load_state_dict(state_dict)
+        model.load_state_dict(state_dict['state_dict'])
 
     dataset_type = get_dataset(config)
 
@@ -75,9 +75,9 @@ def main():
         pin_memory=config.PIN_MEMORY
     )
 
-    nme, predictions = function.inference(config, test_loader, model)
+    function.inference(config, test_loader, model, config.DATASET.TESTSET)
 
-    torch.save(predictions, os.path.join(final_output_dir, 'predictions.pth'))
+    # torch.save(predictions, os.path.join(final_output_dir, 'predictions.pth'))
 
 
 if __name__ == '__main__':

@@ -23,13 +23,15 @@ class RACE(data.Dataset):
     """
     def __init__(self, cfg, is_train=True, transform=None):
         # specify annotation file for dataset
+        self.is_train = is_train
 
-        if is_train:
+        self.is_trainval = cfg.DATASET.TRAIN_VAL
+
+        if is_train or self.is_trainval:
             self.data_root = cfg.DATASET.TRAINSET
         else:
             self.data_root = cfg.DATASET.TESTSET
-
-        self.is_train = is_train
+        
         self.transform = transform
         # self.data_root = cfg.DATASET.ROOT
         self.input_size = cfg.MODEL.IMAGE_SIZE
@@ -43,9 +45,19 @@ class RACE(data.Dataset):
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
         # load annotations
         # self.landmarks_frame = pd.read_csv(self.csv_file)
-
-        self.img_list = os.listdir(os.path.join(self.data_root,'picture'))
         
+        if self.is_trainval:
+            self.img_list = []
+            if self.is_train:
+                with open(os.path.join(self.data_root, 'train.txt')) as f:
+                    for line in f.readlines():
+                        self.img_list.append(line.strip()+'.jpg')
+            else:
+                with open(os.path.join(self.data_root, 'val.txt')) as f:
+                    for line in f.readlines():
+                        self.img_list.append(line.strip()+'.jpg')
+        else:
+            self.img_list = os.listdir(os.path.join(self.data_root,'picture'))
 
     def __len__(self):
         return len(self.img_list)

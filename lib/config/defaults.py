@@ -76,6 +76,7 @@ _C.DATASET.ROOT = ''
 _C.DATASET.DATASET = 'AFLW'
 _C.DATASET.TRAINSET = ''
 _C.DATASET.TESTSET = ''
+_C.DATASET.TRAIN_VAL = False
 
 # training data augmentation
 _C.DATASET.FLIP = True

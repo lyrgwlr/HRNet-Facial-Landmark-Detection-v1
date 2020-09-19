@@ -62,8 +62,9 @@ def main():
         state_dict = state_dict['state_dict']
         model.load_state_dict(state_dict)
     else:
-        model.load_state_dict(state_dict['state_dict'])
-
+        # model.load_state_dict(state_dict['state_dict'])
+        model.load_state_dict(state_dict)
+        
     dataset_type = get_dataset(config)
 
     test_loader = DataLoader(

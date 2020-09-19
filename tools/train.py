@@ -101,25 +101,25 @@ def main():
         num_workers=config.WORKERS,
         pin_memory=config.PIN_MEMORY)
 
-    # val_loader = DataLoader(
-    #     dataset=dataset_type(config,
-    #                          is_train=False),
-    #     batch_size=config.TEST.BATCH_SIZE_PER_GPU*len(gpus),
-    #     shuffle=False,
-    #     num_workers=config.WORKERS,
-    #     pin_memory=config.PIN_MEMORY
-    # )
+    val_loader = DataLoader(
+        dataset=dataset_type(config,
+                             is_train=False),
+        batch_size=config.TEST.BATCH_SIZE_PER_GPU*len(gpus),
+        shuffle=False,
+        num_workers=config.WORKERS,
+        pin_memory=config.PIN_MEMORY
+    )
 
     for epoch in range(last_epoch, config.TRAIN.END_EPOCH):
         # lr_scheduler.step()
-        
+        import pudb; pudb.set_trace()
         nme = function.train(config, train_loader, model, criterion,
                        optimizer, epoch, writer_dict)
         
         lr_scheduler.step()
         # evaluate
-        # nme, predictions = function.validate(config, val_loader, model,
-        #                                      criterion, epoch, writer_dict)
+        nme, predictions = function.validate(config, val_loader, model,
+                                             criterion, epoch, writer_dict)
         predictions = None
         is_best = nme < best_nme
         best_nme = min(nme, best_nme)

@@ -50,6 +50,7 @@ def main():
 
     config.defrost()
     config.MODEL.INIT_WEIGHTS = False
+    config.DATASET.TRAIN_VAL = False
     config.freeze()
     model = models.get_face_alignment_net(config)
 
@@ -66,7 +67,6 @@ def main():
         model.load_state_dict(state_dict)
         
     dataset_type = get_dataset(config)
-
     test_loader = DataLoader(
         dataset=dataset_type(config,
                              is_train=False),

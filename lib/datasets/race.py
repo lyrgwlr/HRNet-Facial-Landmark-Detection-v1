@@ -71,7 +71,7 @@ class RACE(data.Dataset):
                                   'picture',self.img_list[idx])
         bbox_path = os.path.join(self.data_root,
                                   'bbox',self.img_list[idx].split('.')[0]) + '.txt'
-        if self.is_train:
+        if self.is_train or self.is_trainval:
             lmk_path = os.path.join(self.data_root,
                                     'landmark',self.img_list[idx].split('.')[0]) + '.txt'
         bbox = []
@@ -81,7 +81,7 @@ class RACE(data.Dataset):
                     bbox.extend(line)
         bbox = [float(i) for i in bbox]
 
-        if self.is_train:
+        if self.is_train or self.is_trainval:
             pts = []
             with open(lmk_path, "r") as f:
                 for line in f.readlines():
@@ -97,16 +97,16 @@ class RACE(data.Dataset):
 
         center = torch.Tensor([center_w, center_h])
 
-        if self.is_train:
+        if self.is_train or self.is_trainval:
             pts = np.array(pts).astype('float').reshape(-1, 2)
 
         scale *= 1.25
-        if self.is_train:
+        if self.is_train or self.is_trainval:
             nparts = pts.shape[0]
         img = np.array(Image.open(image_path).convert('RGB'), dtype=np.float32)
 
         r = 0
-        if self.is_train:
+        if self.is_train or self.is_trainval:
             scale = scale * (random.uniform(1 - self.scale_factor,
                                             1 + self.scale_factor))
             r = random.uniform(-self.rot_factor, self.rot_factor) \
@@ -130,13 +130,13 @@ class RACE(data.Dataset):
         img = img.astype(np.float32)
         img = (img/255.0 - self.mean) / self.std
         img = img.transpose([2, 0, 1])
-        if self.is_train:
+        if self.is_train or self.is_trainval:
             target = torch.Tensor(target)
             tpts = torch.Tensor(tpts)
         center = torch.Tensor(center)
         bbox = torch.Tensor(bbox)
 
-        if self.is_train:
+        if self.is_train or self.is_trainval:
             meta = {'index': idx, 'center': center, 'scale': scale, 'bbox': bbox,
                     'pts': torch.Tensor(pts), 'tpts': tpts}
             return img, target, meta

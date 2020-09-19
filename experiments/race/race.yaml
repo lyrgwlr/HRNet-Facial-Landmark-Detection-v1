@@ -16,7 +16,7 @@ MODEL:
   NUM_JOINTS: 106
   INIT_WEIGHTS: true
   PRETRAINED: 'hrnetv2_pretrained/hrnetv2_w18_imagenet_pretrained.pth'
-  SIGMA: 2.0 
+  SIGMA: 1.0 
   IMAGE_SIZE:
     - 256
     - 256
@@ -71,7 +71,7 @@ TRAIN:
   END_EPOCH: 60
   RESUME: false
   OPTIMIZER: 'adam'
-  LR: 0.0001
+  LR: 0.0004
   WD: 0.0
   LR_STEP: [30, 50]
   MOMENTUM: 0.0

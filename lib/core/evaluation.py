@@ -89,3 +89,66 @@ def decode_preds(output, center, scale, res):
         preds = preds.view(1, preds.size())
 
     return preds
+
+
+def decode_preds_from_soft_argmax(output, coords, center, scale, res):
+
+    coords = coords.cpu()
+    # pose-processing
+    for n in range(coords.size(0)):
+        for p in range(coords.size(1)):
+            hm = output[n][p]
+            px = int(math.floor(coords[n][p][0]))
+            py = int(math.floor(coords[n][p][1]))
+            if (px > 1) and (px < res[0]) and (py > 1) and (py < res[1]):
+                diff = torch.Tensor([hm[py - 1][px] - hm[py - 1][px - 2], hm[py][px - 1]-hm[py - 2][px - 1]])
+                coords[n][p] += diff.sign() * .25
+    coords += 0.5
+    preds = coords.clone()
+
+    # Transform back
+    for i in range(coords.size(0)):
+        preds[i] = transform_preds(coords[i], center[i], scale[i], res)
+
+    if preds.dim() < 3:
+        preds = preds.view(1, preds.size())
+
+    return preds
+
+
+def compute_auc(nmes):
+    img_nums = len(nmes)
+    nmes.sort()
+    N = 120
+    threshold_prop = np.zeros((N, 2)) # (阈值，正确率)
+    upper_threshold = 0.08
+    thres_lins = np.linspace(0,upper_threshold,N)
+    cur_index = 0
+    for i,thres in enumerate(thres_lins):
+        nums = count_lower_thres(cur_index,nmes, thres)
+        cur_index += nums
+        threshold_prop[i] = [thres, cur_index]
+    threshold_prop[:,1] = threshold_prop[:,1]/img_nums
+    
+    pre_thres = None
+    pre_prop = None
+    area = 0
+    for i in range(N):
+        thres, prop = threshold_prop[i]
+        if pre_thres != thres and pre_thres is not None:
+            area += (prop + pre_prop)/2 * (thres-pre_thres)
+        pre_thres = thres
+        pre_prop = prop
+    area /= upper_threshold  # 面积归一化
+    area *= 100
+    return area
+
+
+def count_lower_thres(cur_index,nmes, thres):
+    nums = 0
+    for i in range(cur_index, len(nmes)):
+        if nmes[i]<=thres:
+            nums += 1
+        else:
+            break
+    return nums

@@ -13,9 +13,11 @@ import time
 import logging
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
-from .evaluation import decode_preds, compute_nme
+from .evaluation import decode_preds, compute_nme, decode_preds_from_soft_argmax, compute_auc
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +43,37 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
+def _assert_no_grad(tensor):
+    assert not tensor.requires_grad, \
+        "nn criterions don't compute the gradient w.r.t. targets - please " \
+        "mark these tensors as not requiring gradients"
+
+def soft_argmax(heatmaps, joint_num):
+    assert isinstance(heatmaps, torch.Tensor)
+    h ,w = heatmaps.shape[-2], heatmaps.shape[-1]
+    heatmaps = heatmaps.reshape((-1, joint_num, h*w))
+    heatmaps = F.softmax(heatmaps, 2)
+    heatmaps = heatmaps.reshape((-1, joint_num, h, w))
+
+    accu_x = heatmaps.sum(dim=2)
+    accu_y = heatmaps.sum(dim=3)
+    
+
+    accu_x = accu_x * torch.cuda.comm.broadcast(torch.arange(w).type(torch.cuda.FloatTensor), devices=[accu_x.device.index])[0]
+    accu_y = accu_y * torch.cuda.comm.broadcast(torch.arange(h).type(torch.cuda.FloatTensor), devices=[accu_y.device.index])[0]
+    
+
+    accu_x = accu_x.sum(dim=2, keepdim=True)
+    accu_y = accu_y.sum(dim=2, keepdim=True) 
+    
+
+    coord_out = torch.cat((accu_x, accu_y), dim=2) #(B,c,2)
+
+    return coord_out
+
 
 def train(config, train_loader, model, critertion, optimizer,
-          epoch, writer_dict):
+          epoch, writer_dict, mse):
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -52,6 +82,7 @@ def train(config, train_loader, model, critertion, optimizer,
     model.train()
     nme_count = 0
     nme_batch_sum = 0
+    nme_batchs = []
 
     end = time.time()
 
@@ -62,14 +93,20 @@ def train(config, train_loader, model, critertion, optimizer,
         # compute the output
         output = model(inp)
         target = target.cuda(non_blocking=True)
-
-        loss = critertion(output, target)
-
-        # NME
         score_map = output.data.cpu()
-        preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+        if mse:
+            loss = critertion(output, target)
+            # NME
+            
+            preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+        else:
+            preds_ = soft_argmax(output, output.shape[1])  # the coord in 64*64 resolution
+            loss = critertion(output, preds_, target, meta['tpts_float'].cuda(non_blocking=True))
+            preds = decode_preds_from_soft_argmax(score_map, preds_.data.cpu(), meta['center'], meta['scale'], [64, 64])
 
         nme_batch = compute_nme(preds, meta)
+        nme_batchs.extend(nme_batch)
+
         nme_batch_sum = nme_batch_sum + np.sum(nme_batch)
         nme_count = nme_count + preds.size(0)
 
@@ -100,13 +137,15 @@ def train(config, train_loader, model, critertion, optimizer,
 
         end = time.time()
     nme = nme_batch_sum / nme_count
-    msg = 'Train Epoch {} time:{:.4f} loss:{:.4f} nme:{:.4f}'\
-        .format(epoch, batch_time.avg, losses.avg, nme)
+    auc = compute_auc(nme_batchs)
+    msg = 'Train Epoch {} time:{:.4f} loss:{:.4f} nme:{:.4f} auc:{:.4f}'\
+        .format(epoch, batch_time.avg, losses.avg, nme, auc)
     logger.info(msg)
-    return nme
+    return nme, auc
 
 
-def validate(config, val_loader, model, criterion, epoch, writer_dict):
+
+def validate(config, val_loader, model, critertion, epoch, writer_dict, mse):
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
@@ -121,6 +160,7 @@ def validate(config, val_loader, model, criterion, epoch, writer_dict):
     nme_batch_sum = 0
     count_failure_008 = 0
     count_failure_010 = 0
+    nme_batchs = []
     end = time.time()
 
     with torch.no_grad():
@@ -128,14 +168,21 @@ def validate(config, val_loader, model, criterion, epoch, writer_dict):
             data_time.update(time.time() - end)
             output = model(inp)
             target = target.cuda(non_blocking=True)
-
             score_map = output.data.cpu()
-            # loss
-            loss = criterion(output, target)
+            if mse:
+                loss = critertion(output, target)
+                # NME
+                preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+            else:
+                preds_ = soft_argmax(output, output.shape[1])  # the coord in 64*64 resolution
+                loss = critertion(output, preds_, target, meta['tpts_float'].cuda(non_blocking=True))
+                preds = decode_preds_from_soft_argmax(score_map, preds_.data.cpu(), meta['center'], meta['scale'], [64, 64])
 
-            preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+
             # NME
             nme_temp = compute_nme(preds, meta)
+
+            nme_batchs.extend(nme_temp)
             # Failure Rate under different threshold
             failure_008 = (nme_temp > 0.08).sum()
             failure_010 = (nme_temp > 0.10).sum()
@@ -156,10 +203,11 @@ def validate(config, val_loader, model, criterion, epoch, writer_dict):
     nme = nme_batch_sum / nme_count
     failure_008_rate = count_failure_008 / nme_count
     failure_010_rate = count_failure_010 / nme_count
+    auc = compute_auc(nme_batchs)
 
     msg = 'Test Epoch {} time:{:.4f} loss:{:.4f} nme:{:.4f} [008]:{:.4f} ' \
-          '[010]:{:.4f}'.format(epoch, batch_time.avg, losses.avg, nme,
-                                failure_008_rate, failure_010_rate)
+          '[010]:{:.4f} auc:{:.4f}'.format(epoch, batch_time.avg, losses.avg, nme,
+                                failure_008_rate, failure_010_rate, auc)
     logger.info(msg)
 
     if writer_dict:
@@ -169,7 +217,7 @@ def validate(config, val_loader, model, criterion, epoch, writer_dict):
         writer.add_scalar('valid_nme', nme, global_steps)
         writer_dict['valid_global_steps'] = global_steps + 1
 
-    return nme, predictions
+    return nme, auc, predictions
 
 # def inference(config, data_loader, model):
 #     batch_time = AverageMeter()

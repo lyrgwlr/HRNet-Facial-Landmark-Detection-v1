@@ -152,13 +152,13 @@ def transform_pixel(pt, center, scale, output_size, invert=0, rot=0):
         t = np.linalg.inv(t)
     new_pt = np.array([pt[0] - 1, pt[1] - 1, 1.]).T
     new_pt = np.dot(t, new_pt)
-    return new_pt[:2].astype(int) + 1
-
+    # return new_pt[:2].astype(int) + 1, new_pt[:2]
+    return new_pt[:2].astype(int) + 1, new_pt[:2]
 
 def transform_preds(coords, center, scale, output_size):
 
     for p in range(coords.size(0)):
-        coords[p, 0:2] = torch.tensor(transform_pixel(coords[p, 0:2], center, scale, output_size, 1, 0))
+        coords[p, 0:2] = torch.tensor(transform_pixel(coords[p, 0:2], center, scale, output_size, 1, 0)[0])
     return coords
 
 
@@ -184,9 +184,9 @@ def crop(img, center, scale, output_size, rot=0):
             scale = scale / sf
 
     # Upper left point
-    ul = np.array(transform_pixel([0, 0], center_new, scale, output_size, invert=1))
+    ul = np.array(transform_pixel([0, 0], center_new, scale, output_size, invert=1)[0])
     # Bottom right point
-    br = np.array(transform_pixel(output_size, center_new, scale, output_size, invert=1))
+    br = np.array(transform_pixel(output_size, center_new, scale, output_size, invert=1)[0])
 
     # Padding so that when rotated proper amount of context is included
     pad = int(np.linalg.norm(br - ul) / 2 - float(br[1] - ul[1]) / 2)
@@ -246,6 +246,34 @@ def generate_target(img, pt, sigma, label_type='Gaussian'):
 
     img[img_y[0]:img_y[1], img_x[0]:img_x[1]] = g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
     return img
+
+def generate_onehot(coord,mask):
+    #import pudb;pudb.set_trace()
+    x , y= coord[0],coord[1]
+    if (x >= mask.shape[1] or y >= mask.shape[0] or x < 0 or y < 0):
+    # If not, just return the image as is
+        return mask
+
+    x_floor , y_floor=int(np.floor(x)),int(np.floor(y))
+    prob_lt = (1-(x-x_floor))*(1-(y-y_floor))
+    prob_lb = (1-(x-x_floor))*(y-y_floor)
+    prob_rt = (x-x_floor)*(1-(y-y_floor))
+    prob_rb = (x-x_floor)*(y-y_floor)
+    
+    if y_floor < 64 and x_floor < 64:
+        mask[y_floor, x_floor] = prob_lt
+    if y_floor + 1 < 64 and x_floor < 64:
+        mask[y_floor+1, x_floor] = prob_lb
+    if y_floor < 64 and x_floor + 1 < 64:
+        mask[y_floor, x_floor+1] = prob_rt
+    if y_floor + 1 < 64 and x_floor + 1 < 64:
+        mask[y_floor+1, x_floor+1] = prob_rb
+
+    #mask_flatten = mask.view(-1)
+    #print(torch.nonzero(mask_flatten),'11111111111111')
+    #onehot = torch.zeros((4, mask.shape[0]*mask.shape[1])).scatter_(1,torch.nonzero(mask_flatten), 1)
+    #weight=mask[torch.nonzero(mask).squeeze()]
+    return mask
 
 
 

@@ -51,7 +51,8 @@ def main():
     config.defrost()
     config.MODEL.INIT_WEIGHTS = False
     config.freeze()
-    model = models.get_face_alignment_net(config)
+    # model = models.get_face_alignment_net(config)
+    model = models.get_res_lmk_net(config)
 
     gpus = list(config.GPUS)
     model = nn.DataParallel(model, device_ids=gpus).cuda()
@@ -62,7 +63,13 @@ def main():
         state_dict = state_dict['state_dict']
         model.load_state_dict(state_dict)
     else:
-        model.load_state_dict(state_dict['state_dict'])
+        # from collections import OrderedDict
+        # new_state_dict = OrderedDict()
+        # for k, v in state_dict.items():
+        #     name = k[7:] 
+        #     new_state_dict[name] = v
+
+        model.load_state_dict(state_dict)
 
     dataset_type = get_dataset(config)
 

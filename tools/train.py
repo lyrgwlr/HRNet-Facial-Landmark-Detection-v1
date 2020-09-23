@@ -21,6 +21,7 @@ from lib.config import config, update_config
 from lib.datasets import get_dataset
 from lib.core import function
 from lib.utils import utils
+from integral import MixedLoss, soft_argmax
 
 
 def parse_args():
@@ -50,6 +51,7 @@ def main():
     cudnn.enabled = config.CUDNN.ENABLED
 
     model = models.get_face_alignment_net(config)
+    # model = models.get_res_lmk_net(config)
 
     # copy model files
     writer_dict = {
@@ -62,10 +64,14 @@ def main():
     model = nn.DataParallel(model, device_ids=gpus).cuda()
 
     # loss
-    criterion = torch.nn.MSELoss(size_average=True).cuda()
+    if config.TRAIN.MSE:
+        criterion = torch.nn.MSELoss(size_average=True).cuda()
+    else:
+        criterion = MixedLoss()
+
 
     optimizer = utils.get_optimizer(config, model)
-    best_nme = 100
+    best_auc = 100
     last_epoch = config.TRAIN.BEGIN_EPOCH
     if config.TRAIN.RESUME:
         model_state_file = os.path.join(final_output_dir,
@@ -101,35 +107,39 @@ def main():
         num_workers=config.WORKERS,
         pin_memory=config.PIN_MEMORY)
 
-    # val_loader = DataLoader(
-    #     dataset=dataset_type(config,
-    #                          is_train=False),
-    #     batch_size=config.TEST.BATCH_SIZE_PER_GPU*len(gpus),
-    #     shuffle=False,
-    #     num_workers=config.WORKERS,
-    #     pin_memory=config.PIN_MEMORY
-    # )
+    if config.DATASET.TRAIN_VAL:
+
+        val_loader = DataLoader(
+            dataset=dataset_type(config,
+                                is_train=False),
+            batch_size=config.TEST.BATCH_SIZE_PER_GPU*len(gpus),
+            shuffle=False,
+            num_workers=config.WORKERS,
+            pin_memory=config.PIN_MEMORY
+        )
 
     for epoch in range(last_epoch, config.TRAIN.END_EPOCH):
         # lr_scheduler.step()
         
-        nme = function.train(config, train_loader, model, criterion,
-                       optimizer, epoch, writer_dict)
+        nme, auc = function.train(config, train_loader, model, criterion,
+                       optimizer, epoch, writer_dict, config.TRAIN.MSE)
         
         lr_scheduler.step()
         # evaluate
-        # nme, predictions = function.validate(config, val_loader, model,
-        #                                      criterion, epoch, writer_dict)
-        predictions = None
-        is_best = nme < best_nme
-        best_nme = min(nme, best_nme)
-
+        if config.DATASET.TRAIN_VAL:
+            nme, auc, predictions = function.validate(config, val_loader, model,
+                                                criterion, epoch, writer_dict, config.TRAIN.MSE)
+        else:
+            predictions = torch.zeros((2000, config.MODEL.NUM_JOINTS, 2))
+        is_best = auc < best_auc
+        best_auc = min(auc, best_auc)
+        
         logger.info('=> saving checkpoint to {}'.format(final_output_dir))
         print("best:", is_best)
         utils.save_checkpoint(
             {"state_dict": model.state_dict(),
              "epoch": epoch + 1,
-             "best_nme": best_nme,
+             "best_auc": best_auc,
              "optimizer": optimizer.state_dict(),
              }, predictions, is_best, final_output_dir, 'checkpoint_{}.pth'.format(epoch))
 
@@ -137,7 +147,7 @@ def main():
                                           'final_state.pth')
     logger.info('saving final model state to {}'.format(
         final_model_state_file))
-    torch.save(model.module.state_dict(), final_model_state_file)
+    torch.save(model.state_dict(), final_model_state_file)
     writer_dict['writer'].close()
 
 

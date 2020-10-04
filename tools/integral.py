@@ -34,29 +34,62 @@ class MixedLoss(nn.Module):
         self.w2 = 1 - self.w1
         self.cross_entropy_loss = SoftmaxCrossEntropyWithLogits()
 
-    def forward(self, pred_heatmap, pred_coord, target,gt_coord):
+    def forward(self, pred_heatmap, target, gt_coord):
         
         #gt_heatmap, gt_coord = target['heatmap'], target['coord']
-
+        normalized_heatmap, pred_coord = soft_argmax(pred_heatmap, pred_heatmap.shape[1])
         # Heatmap loss
-        N, C = pred_heatmap.shape[0:2]
-        pred_heatmap = pred_heatmap.view(N*C, -1)
-
+        N, C = normalized_heatmap.shape[0:2]
+        normalized_heatmap = normalized_heatmap.view(N*C, -1)
+        # pred_heatmap = pred_heatmap.view(N*C, -1)
+        
         gt_heatmap = target.view(N*C,  -1)
 
-        assert pred_heatmap.shape == gt_heatmap.shape
+        assert normalized_heatmap.shape == gt_heatmap.shape
+        # assert pred_heatmap.shape == gt_heatmap.shape
+        _assert_no_grad(gt_heatmap)
+        _assert_no_grad(gt_coord)
        
-        hm_loss = self.cross_entropy_loss(pred_heatmap, gt_heatmap)
+        hm_loss = self.cross_entropy_loss(normalized_heatmap, gt_heatmap)
 
         # Coord L1 loss
         l1_loss = torch.mean(torch.abs(pred_coord - gt_coord))
 
-        return self.w1 * hm_loss + self.w2 * l1_loss
+        return self.w1 * hm_loss, self.w2 * l1_loss, pred_coord
 
+class MixedLoss_v2(nn.Module):
+    '''
+    ref: https://github.com/mks0601/PoseFix_RELEASE/blob/master/main/model.py
+    input: {
+        'heatmap': (N, C, h,w) unnormalized
+        'coord': (N, C, 3)
+    }
+    target: {
+        'heatmap': (N, C, 4,h*w), normalized
+        'coord': (N, C, 3)
+    }
+    '''
+    def __init__(self, heatmap_weight=0.5):
+    
+        super(MixedLoss_v2, self).__init__()
+        self.w1 = heatmap_weight
+        self.w2 = 1 - self.w1
+        self.mse_loss = torch.nn.MSELoss(size_average=True).cuda()
 
+    def forward(self, pred_heatmap, target, gt_coord):
+        
+        _, pred_coord = soft_argmax(pred_heatmap, pred_heatmap.shape[1])
+        
+        assert pred_heatmap.shape == target.shape
+        _assert_no_grad(target)
+        _assert_no_grad(gt_coord)
+       
+        hm_loss = self.mse_loss(torch.sigmoid(pred_heatmap), target)
 
-import numpy as np
+        # Coord L1 loss
+        l1_loss = torch.mean(torch.abs(pred_coord - gt_coord))
 
+        return self.w1 * hm_loss , self.w2 * l1_loss, pred_coord
 
 def _assert_no_grad(tensor):
     assert not tensor.requires_grad, \
@@ -84,5 +117,5 @@ def soft_argmax(heatmaps, joint_num):
 
     coord_out = torch.cat((accu_x, accu_y), dim=2) #(B,c,2)
 
-    return coord_out
+    return heatmaps, coord_out
 

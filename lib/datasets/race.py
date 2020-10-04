@@ -13,7 +13,7 @@ import pandas as pd
 from PIL import Image, ImageFile
 import numpy as np
 import math
-from ..utils.transforms import fliplr_joints, crop, generate_target, transform_pixel,generate_onehot
+from ..utils.transforms import fliplr_joints, crop, generate_target, transform_pixel, generate_onehot
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -130,7 +130,9 @@ class RACE(data.Dataset):
                         target[i] = generate_target(target[i], tpts_int[i]-1, self.sigma,
                                                     label_type=self.label_type)
                     else:
-                        target[i] = generate_onehot(tpts_float[i], target[i])
+                        # target[i] = generate_onehot(tpts_float[i], target[i])
+                        target[i] = generate_target(target[i], tpts_int[i]-1, self.sigma,
+                                                    label_type=self.label_type)
             # print(tpts_int,tpts_float)
  
         img = crop(img, center, scale, self.input_size, rot=r)

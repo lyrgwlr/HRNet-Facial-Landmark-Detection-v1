@@ -91,18 +91,18 @@ def decode_preds(output, center, scale, res):
     return preds
 
 
-def decode_preds_from_soft_argmax(output, coords, center, scale, res):
+def decode_preds_from_soft_argmax(coords, center, scale, res):
 
     coords = coords.cpu()
     # pose-processing
-    for n in range(coords.size(0)):
-        for p in range(coords.size(1)):
-            hm = output[n][p]
-            px = int(math.floor(coords[n][p][0]))
-            py = int(math.floor(coords[n][p][1]))
-            if (px > 1) and (px < res[0]) and (py > 1) and (py < res[1]):
-                diff = torch.Tensor([hm[py - 1][px] - hm[py - 1][px - 2], hm[py][px - 1]-hm[py - 2][px - 1]])
-                coords[n][p] += diff.sign() * .25
+    # for n in range(coords.size(0)):
+    #     for p in range(coords.size(1)):
+    #         hm = output[n][p]
+    #         px = int(math.floor(coords[n][p][0]))
+    #         py = int(math.floor(coords[n][p][1]))
+    #         if (px > 1) and (px < res[0]) and (py > 1) and (py < res[1]):
+    #             diff = torch.Tensor([hm[py - 1][px] - hm[py - 1][px - 2], hm[py][px - 1]-hm[py - 2][px - 1]])
+    #             coords[n][p] += diff.sign() * .25
     coords += 0.5
     preds = coords.clone()
 

@@ -21,7 +21,7 @@ from lib.config import config, update_config
 from lib.datasets import get_dataset
 from lib.core import function
 from lib.utils import utils
-from integral import MixedLoss, soft_argmax
+from integral import MixedLoss, soft_argmax, MixedLoss_v2
 
 
 def parse_args():
@@ -67,11 +67,11 @@ def main():
     if config.TRAIN.MSE:
         criterion = torch.nn.MSELoss(size_average=True).cuda()
     else:
-        criterion = MixedLoss()
+        criterion = MixedLoss_v2().cuda()
 
 
     optimizer = utils.get_optimizer(config, model)
-    best_auc = 100
+    best_auc = 1
     last_epoch = config.TRAIN.BEGIN_EPOCH
     if config.TRAIN.RESUME:
         model_state_file = os.path.join(final_output_dir,
@@ -79,7 +79,7 @@ def main():
         if os.path.islink(model_state_file):
             checkpoint = torch.load(model_state_file)
             last_epoch = checkpoint['epoch']
-            best_nme = checkpoint['best_nme']
+            best_auc = checkpoint['best_auc']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint (epoch {})"
@@ -131,8 +131,8 @@ def main():
                                                 criterion, epoch, writer_dict, config.TRAIN.MSE)
         else:
             predictions = torch.zeros((2000, config.MODEL.NUM_JOINTS, 2))
-        is_best = auc < best_auc
-        best_auc = min(auc, best_auc)
+        is_best = auc > best_auc
+        best_auc = max(auc, best_auc)
         
         logger.info('=> saving checkpoint to {}'.format(final_output_dir))
         print("best:", is_best)

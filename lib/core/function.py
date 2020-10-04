@@ -48,7 +48,9 @@ def _assert_no_grad(tensor):
         "nn criterions don't compute the gradient w.r.t. targets - please " \
         "mark these tensors as not requiring gradients"
 
-def soft_argmax(heatmaps, joint_num):
+
+
+def soft_argmax_(heatmaps, joint_num):
     assert isinstance(heatmaps, torch.Tensor)
     h ,w = heatmaps.shape[-2], heatmaps.shape[-1]
     heatmaps = heatmaps.reshape((-1, joint_num, h*w))
@@ -59,12 +61,12 @@ def soft_argmax(heatmaps, joint_num):
     accu_y = heatmaps.sum(dim=3)
     
 
-    accu_x = accu_x * torch.cuda.comm.broadcast(torch.arange(w).type(torch.cuda.FloatTensor), devices=[accu_x.device.index])[0]
-    accu_y = accu_y * torch.cuda.comm.broadcast(torch.arange(h).type(torch.cuda.FloatTensor), devices=[accu_y.device.index])[0]
+    accu_x = accu_x * torch.cuda.comm.broadcast(torch.arange(1,w+1).type(torch.cuda.FloatTensor), devices=[accu_x.device.index])[0]
+    accu_y = accu_y * torch.cuda.comm.broadcast(torch.arange(1,h+1).type(torch.cuda.FloatTensor), devices=[accu_y.device.index])[0]
     
 
-    accu_x = accu_x.sum(dim=2, keepdim=True)
-    accu_y = accu_y.sum(dim=2, keepdim=True) 
+    accu_x = accu_x.sum(dim=2, keepdim=True)-1
+    accu_y = accu_y.sum(dim=2, keepdim=True)-1
     
 
     coord_out = torch.cat((accu_x, accu_y), dim=2) #(B,c,2)
@@ -77,7 +79,10 @@ def train(config, train_loader, model, critertion, optimizer,
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
-    losses = AverageMeter()
+    
+    hm_losses = AverageMeter()
+    l1_losses = AverageMeter()
+    losses = AverageMeter()    
 
     model.train()
     nme_count = 0
@@ -95,14 +100,16 @@ def train(config, train_loader, model, critertion, optimizer,
         target = target.cuda(non_blocking=True)
         score_map = output.data.cpu()
         if mse:
-            loss = critertion(output, target)
-            # NME
-            
+            hm_loss = critertion(output, target)
+            l1_loss = torch.zeros([1])
+            loss = hm_loss
+            # NME    
             preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
         else:
-            preds_ = soft_argmax(output, output.shape[1])  # the coord in 64*64 resolution
-            loss = critertion(output, preds_, target, meta['tpts_float'].cuda(non_blocking=True))
-            preds = decode_preds_from_soft_argmax(score_map, preds_.data.cpu(), meta['center'], meta['scale'], [64, 64])
+            # heatmap, preds_ = soft_argmax(output, output.shape[1])  # the coord in 64*64 resolution
+            hm_loss, l1_loss, preds_ = critertion(output, target, meta['tpts_float'].cuda(non_blocking=True))
+            loss = hm_loss + l1_loss
+            preds = decode_preds_from_soft_argmax(preds_.data.cpu(), meta['center'], meta['scale'], [64, 64])
 
         nme_batch = compute_nme(preds, meta)
         nme_batchs.extend(nme_batch)
@@ -114,7 +121,11 @@ def train(config, train_loader, model, critertion, optimizer,
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-
+        
+        
+        hm_losses.update(hm_loss.item(), inp.size(0))
+        l1_losses.update(l1_loss.item(), inp.size(0))
+         
         losses.update(loss.item(), inp.size(0))
 
         batch_time.update(time.time()-end)
@@ -123,10 +134,12 @@ def train(config, train_loader, model, critertion, optimizer,
                   'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
                   'Speed {speed:.1f} samples/s\t' \
                   'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
+                  'hm_loss {hm_loss.val:.5f} ({hm_loss.avg:.5f})\t'  \
+                  'l1_loss {l1_loss.val:.5f} ({l1_loss.avg:.5f})\t'  \
                   'Loss {loss.val:.5f} ({loss.avg:.5f})\t'.format(
                       epoch, i, len(train_loader), batch_time=batch_time,
                       speed=inp.size(0)/batch_time.val,
-                      data_time=data_time, loss=losses)
+                      data_time=data_time, hm_loss=hm_losses, l1_loss=l1_losses, loss=losses)
             logger.info(msg)
 
             if writer_dict:
@@ -138,8 +151,8 @@ def train(config, train_loader, model, critertion, optimizer,
         end = time.time()
     nme = nme_batch_sum / nme_count
     auc = compute_auc(nme_batchs)
-    msg = 'Train Epoch {} time:{:.4f} loss:{:.4f} nme:{:.4f} auc:{:.4f}'\
-        .format(epoch, batch_time.avg, losses.avg, nme, auc)
+    msg = 'Train Epoch {} time:{:.4f} hm_loss:{:.4f} l1_loss:{:.4f} loss:{:.4f} nme:{:.4f} auc:{:.4f}'\
+        .format(epoch, batch_time.avg, hm_losses.avg, l1_losses.avg, losses.avg, nme, auc)
     logger.info(msg)
     return nme, auc
 
@@ -174,9 +187,9 @@ def validate(config, val_loader, model, critertion, epoch, writer_dict, mse):
                 # NME
                 preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
             else:
-                preds_ = soft_argmax(output, output.shape[1])  # the coord in 64*64 resolution
-                loss = critertion(output, preds_, target, meta['tpts_float'].cuda(non_blocking=True))
-                preds = decode_preds_from_soft_argmax(score_map, preds_.data.cpu(), meta['center'], meta['scale'], [64, 64])
+                # heatmap, preds_ = soft_argmax(output, output.shape[1])  # the coord in 64*64 resolution
+                loss, preds_ = critertion(output, target, meta['tpts_float'].cuda(non_blocking=True))
+                preds = decode_preds_from_soft_argmax(preds_.data.cpu(), meta['center'], meta['scale'], [64, 64])
 
 
             # NME
@@ -270,12 +283,12 @@ def validate(config, val_loader, model, critertion, epoch, writer_dict, mse):
 
 #     return nme, predictions
 
-def inference(config, data_loader, model, out_path):
+def inference(config, data_loader, model, out_path, mse):
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
     num_classes = config.MODEL.NUM_JOINTS
-    predictions = torch.zeros((len(data_loader.dataset), num_classes, 2))
+ 
 
     model.eval()
     end = time.time()
@@ -285,9 +298,17 @@ def inference(config, data_loader, model, out_path):
             data_time.update(time.time() - end)
 
             output = model(inp)
+            # score_map = output.data.cpu()
+            # # preds: N x L x 2
+            # preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+
             score_map = output.data.cpu()
-            # preds: N x L x 2
-            preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+            if mse:
+                # NME
+                preds = decode_preds(score_map, meta['center'], meta['scale'], [64, 64])
+            else:
+                preds_ = soft_argmax_(output, output.shape[1])  # the coord in 64*64 resolution  
+                preds = decode_preds_from_soft_argmax(preds_.data.cpu(), meta['center'], meta['scale'], [64, 64])
 
             for n in range(score_map.size(0)):
                 name = meta['img_name'][n].split('.')[0]+'.txt'

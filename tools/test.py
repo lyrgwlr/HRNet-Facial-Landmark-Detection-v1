@@ -51,8 +51,8 @@ def main():
     config.defrost()
     config.MODEL.INIT_WEIGHTS = False
     config.freeze()
-    # model = models.get_face_alignment_net(config)
-    model = models.get_res_lmk_net(config)
+    model = models.get_face_alignment_net(config)
+    # model = models.get_res_lmk_net(config)
 
     gpus = list(config.GPUS)
     model = nn.DataParallel(model, device_ids=gpus).cuda()
@@ -81,8 +81,8 @@ def main():
         num_workers=config.WORKERS,
         pin_memory=config.PIN_MEMORY
     )
-
-    function.inference(config, test_loader, model, config.DATASET.TESTSET)
+    # import pudb; pudb.set_trace()
+    function.inference(config, test_loader, model, config.DATASET.TESTSET, config.TRAIN.MSE)
 
     # torch.save(predictions, os.path.join(final_output_dir, 'predictions.pth'))
 
